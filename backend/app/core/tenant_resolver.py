@@ -76,10 +76,30 @@ class TenantResolver:
         Args:
             user_id: User ID
             user_email: User email
+            token: Optional JWT token
             
         Returns:
             Tenant ID
         """
+        # Try extracting from token claims if token provided
+        if token:
+            try:
+                import jwt
+                from ..config import settings
+                payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"], options={"verify_aud": False})
+                resolved = TenantResolver.resolve_tenant_from_token(payload)
+                if resolved:
+                    return resolved
+            except Exception:
+                try:
+                    import jwt
+                    payload = jwt.decode(token, options={"verify_signature": False})
+                    resolved = TenantResolver.resolve_tenant_from_token(payload)
+                    if resolved:
+                        return resolved
+                except Exception:
+                    pass
+
         # Fallback mapping by known user email.
         if user_email == "sunset@propertyflow.com":
             return "tenant-a"

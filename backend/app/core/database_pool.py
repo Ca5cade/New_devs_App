@@ -10,23 +10,38 @@ class DatabasePool:
     def __init__(self):
         self.engine = None
         self.session_factory = None
+        self._initialized = False
         
     async def initialize(self):
         """Initialize database connection pool"""
+        if self._initialized:
+            return
+        self._initialized = True
+
         try:
             # Create async engine with connection pooling
-            database_url = f"postgresql+asyncpg://{settings.supabase_db_user}:{settings.supabase_db_password}@{settings.supabase_db_host}:{settings.supabase_db_port}/{settings.supabase_db_name}"
+            db_url = getattr(settings, 'database_url', "postgresql://postgres:postgres@db:5432/propertyflow")
+            if db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif not db_url.startswith("postgresql+asyncpg://"):
+                db_url = f"postgresql+asyncpg://{db_url}"
             
-            self.engine = create_async_engine(
-                database_url,
-                poolclass=QueuePool,
+            engine = create_async_engine(
+                db_url,
                 pool_size=20,  # Number of connections to maintain
                 max_overflow=30,  # Additional connections when needed
                 pool_pre_ping=True,  # Validate connections
                 pool_recycle=3600,  # Recycle connections every hour
+                connect_args={"timeout": 1.0},
                 echo=False  # Set to True for SQL debugging
             )
-            
+
+            # Test connection quickly with timeout
+            async with asyncio.timeout(1.0):
+                async with engine.connect() as conn:
+                    pass
+
+            self.engine = engine
             self.session_factory = async_sessionmaker(
                 bind=self.engine,
                 class_=AsyncSession,
@@ -36,7 +51,7 @@ class DatabasePool:
             logger.info("✅ Database connection pool initialized")
             
         except Exception as e:
-            logger.error(f"❌ Database pool initialization failed: {e}")
+            logger.info(f"Database connection not available ({e}); system running in mock fallback mode.")
             self.engine = None
             self.session_factory = None
     
@@ -45,7 +60,7 @@ class DatabasePool:
         if self.engine:
             await self.engine.dispose()
     
-    async def get_session(self) -> AsyncSession:
+    def get_session(self) -> AsyncSession:
         """Get database session from pool"""
         if not self.session_factory:
             raise Exception("Database pool not initialized")

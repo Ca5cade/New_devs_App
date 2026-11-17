@@ -1,16 +1,61 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { RevenueSummary } from "./RevenueSummary";
+import { SecureAPI } from "../lib/secureApi";
+import { useAuth } from "../contexts/AuthContext.new";
 
-const PROPERTIES = [
-  { id: 'prop-001', name: 'Beach House Alpha' },
-  { id: 'prop-002', name: 'City Apartment Downtown' },
-  { id: 'prop-003', name: 'Country Villa Estate' },
-  { id: 'prop-004', name: 'Lakeside Cottage' },
-  { id: 'prop-005', name: 'Urban Loft Modern' }
-];
+interface Property {
+  id: string;
+  name: string;
+  timezone?: string;
+}
+
+// Client-side fallback properties partitioned strictly by tenant
+const TENANT_PROPERTIES_MAP: Record<string, Property[]> = {
+  'tenant-a': [
+    { id: 'prop-001', name: 'Beach House Alpha' },
+    { id: 'prop-002', name: 'City Apartment Downtown' },
+    { id: 'prop-003', name: 'Country Villa Estate' }
+  ],
+  'tenant-b': [
+    { id: 'prop-001', name: 'Mountain Lodge Beta' },
+    { id: 'prop-004', name: 'Lakeside Cottage' },
+    { id: 'prop-005', name: 'Urban Loft Modern' }
+  ]
+};
 
 const Dashboard: React.FC = () => {
-  const [selectedProperty, setSelectedProperty] = useState('prop-001');
+  const { user } = useAuth();
+  const tenantId = user?.tenant_id || (user?.email?.includes('ocean') ? 'tenant-b' : 'tenant-a');
+
+  const defaultList = TENANT_PROPERTIES_MAP[tenantId] || TENANT_PROPERTIES_MAP['tenant-a'];
+  const [properties, setProperties] = useState<Property[]>(defaultList);
+  const [selectedProperty, setSelectedProperty] = useState<string>(defaultList[0]?.id || 'prop-001');
+
+  useEffect(() => {
+    // When tenant context changes, immediately initialize properties for that tenant
+    const currentList = TENANT_PROPERTIES_MAP[tenantId] || TENANT_PROPERTIES_MAP['tenant-a'];
+    setProperties(currentList);
+    if (!currentList.some(p => p.id === selectedProperty)) {
+      setSelectedProperty(currentList[0]?.id || 'prop-001');
+    }
+
+    // Then dynamically fetch properties for this tenant from backend
+    const fetchProperties = async () => {
+      try {
+        const data = await SecureAPI.getDashboardProperties();
+        if (Array.isArray(data) && data.length > 0) {
+          setProperties(data);
+          if (!data.some(p => p.id === selectedProperty)) {
+            setSelectedProperty(data[0].id);
+          }
+        }
+      } catch (err) {
+        console.warn('Using client-side tenant properties fallback:', err);
+      }
+    };
+
+    fetchProperties();
+  }, [tenantId]);
 
   return (
     <div className="p-4 lg:p-6 min-h-full">
@@ -23,7 +68,7 @@ const Dashboard: React.FC = () => {
               <div>
                 <h2 className="text-lg lg:text-xl font-medium text-gray-900 mb-2">Revenue Overview</h2>
                 <p className="text-sm lg:text-base text-gray-600">
-                  Monthly performance insights for your properties
+                  Monthly performance insights for your properties (March 2024)
                 </p>
               </div>
               
@@ -33,11 +78,11 @@ const Dashboard: React.FC = () => {
                 <select
                   value={selectedProperty}
                   onChange={(e) => setSelectedProperty(e.target.value)}
-                  className="block w-full sm:w-auto min-w-[200px] px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  className="block w-full sm:w-auto min-w-[220px] px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm font-medium"
                 >
-                  {PROPERTIES.map((property) => (
-                    <option key={property.id} value={property.id}>
-                      {property.name}
+                  {properties.map((property) => (
+                    <option key={`${property.id}-${property.name}`} value={property.id}>
+                      {property.name} ({property.id})
                     </option>
                   ))}
                 </select>
@@ -46,7 +91,7 @@ const Dashboard: React.FC = () => {
           </div>
 
           <div className="space-y-6">
-            <RevenueSummary propertyId={selectedProperty} />
+            <RevenueSummary propertyId={selectedProperty} debugTenant={tenantId} />
           </div>
         </div>
       </div>
